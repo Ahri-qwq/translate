@@ -1,0 +1,55 @@
+# ===========================================================================
+# 微信公众号翻译流水线 — 配置文件模板
+# ===========================================================================
+# 复制此文件为 config.yaml 并填入实际值。
+# config.yaml 已加入 .gitignore，不会被提交到仓库。
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# LLM 提供商配置
+# ---------------------------------------------------------------------------
+llm:
+  default: "qwen"       # 默认使用的 LLM（可通过 --llm 参数覆盖）
+  providers:
+    qwen:
+      api_key: "sk-xxx"                                           # DashScope API Key
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      model_name: "qwen3.7-max"
+    deepseek:
+      api_key: "sk-xxx"                                           # DeepSeek API Key
+      base_url: "https://api.deepseek.com"
+      model_name: "deepseek-v4-pro"
+
+paths:
+  processed_data: "data/processed"
+  prompts: "prompts"
+
+# ---------------------------------------------------------------------------
+# OSS 图片上传配置（阿里云对象存储）
+# 新用户在新环境中只需修改 access_key_id 和 access_key_secret 即可
+# ---------------------------------------------------------------------------
+oss:
+  access_key_id: ""                                               # 阿里云 AccessKey ID（必填）
+  access_key_secret: ""                                           # 阿里云 AccessKey Secret（必填）
+  bucket: "dp-public"                                             # OSS Bucket 名称
+  endpoint: "oss-cn-beijing.aliyuncs.com"                         # OSS Endpoint（外网访问）
+  region: "cn-beijing"                                            # Bucket 所在地域
+  path_prefix: "community/Blog Files"                             # OSS 上传路径前缀
+
+# ---------------------------------------------------------------------------
+# 翻译审查配置
+# ---------------------------------------------------------------------------
+review:
+  cross_review: true               # 是否启用双模型交叉审查 false/true
+  second_reviewer: "qwen"           # 第二个审查模型（引用 llm.providers 中的名称）
+  max_revise_rounds: 1              # 最大修改轮次（1=审查未通过时修改1次）
+
+# ---------------------------------------------------------------------------
+# GitHub 博客上传配置
+# 通过 gh CLI 创建 PR 将博客文章上传到 deepmodeling/blog
+# 仓库缓存目录默认在项目外部 (../blog-cache)，确保与项目仓库隔离
+# ---------------------------------------------------------------------------
+github:
+  repo: "deepmodeling/blog"         # 目标仓库
+  branch: "master"                  # 目标分支（PR base）
+  cache_dir: ""                     # 本地缓存目录（留空则默认 ../blog-cache）
