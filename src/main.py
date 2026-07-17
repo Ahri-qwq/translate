@@ -177,17 +177,30 @@ class WeChatTranslatePipeline:
 
         # ── Step 6: 上传 GitHub ──
         if self.github_uploader:
-            print(f"\n[Step 6/6] 上传 GitHub → PR...")
+            blog_basename = os.path.basename(blog_path)
+            print(f"\n[Step 6/6] 上传 GitHub → PR")
+            print(f"   前 5 步已完成，即将提交到 {self.github_uploader.repo}")
+            print(f"   文件: {blog_basename}")
+
             while True:
-                try:
-                    pr_url = self.github_uploader.upload_post(blog_path, article_dir)
-                    if pr_url:
-                        print(f"   ✅ PR: {pr_url}")
+                choice = input("   [1] 提交 PR  [2] 跳过: ").strip()
+                if choice == '1':
+                    while True:
+                        try:
+                            pr_url = self.github_uploader.upload_post(blog_path, article_dir)
+                            if pr_url:
+                                print(f"   ✅ PR: {pr_url}")
+                            break
+                        except Exception as e:
+                            if not _ask_retry("GitHub 上传", str(e)):
+                                print("   ⚠️ 上传失败，已跳过")
+                                break
                     break
-                except Exception as e:
-                    if not _ask_retry("GitHub 上传", str(e)):
-                        print("   ⚠️ 跳过 GitHub 上传")
-                        break
+                elif choice == '2':
+                    print(f"   ⏭️ 已跳过 GitHub 上传（blog_output 文件已生成，可稍后手动上传）")
+                    break
+                else:
+                    print("   请输入 1 或 2")
         else:
             print(f"\n[Step 6/6] GitHub 未配置或 gh 不可用，跳过上传")
 
