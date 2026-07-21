@@ -19,6 +19,8 @@ import sys
 import urllib.parse
 from typing import Dict, Optional, Tuple
 
+from utils import find_file_by_suffix, find_file_by_basename
+
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -118,20 +120,13 @@ class OSSUploader:
 
     @staticmethod
     def _find_map_file(article_dir: str) -> Optional[str]:
-        """在文章目录中定位 images_map.txt"""
-        for name in os.listdir(article_dir):
-            if name.endswith('.images_map.txt'):
-                return os.path.join(article_dir, name)
-        return None
+        """在文章目录中定位 images_map.txt（委托 utils）"""
+        return find_file_by_suffix(article_dir, '.images_map.txt')
 
     @staticmethod
     def _find_local_file(images_dir: str, basename: str) -> Optional[str]:
-        """根据 basename（如 img_001）找到带扩展名的实际文件"""
-        for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']:
-            fpath = os.path.join(images_dir, f"{basename}{ext}")
-            if os.path.exists(fpath):
-                return fpath
-        return None
+        """根据 basename（如 img_001）找到带扩展名的实际文件（委托 utils）"""
+        return find_file_by_basename(images_dir, basename)
 
     # ------------------------------------------------------------------
     # 内部方法 — ossutil 调用
@@ -150,9 +145,9 @@ class OSSUploader:
             )
             return 'ossutil'  # PATH 中可用，直接用命令名
         except FileNotFoundError:
-            pass
-        except Exception:
-            return 'ossutil'  # 找到了但执行出错（如网络），仍可用
+            pass  # PATH 中没有，进入下方目录搜索
+        except subprocess.TimeoutExpired:
+            return 'ossutil'  # 存在但响应慢，仍认为可用
 
         # 2) 搜索常见安装目录
         if sys.platform == 'win32':
