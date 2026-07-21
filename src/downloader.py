@@ -24,6 +24,8 @@ import urllib.parse
 from typing import Tuple, Dict, List, Optional
 from urllib.parse import urljoin
 
+from utils import find_file_by_basename
+
 
 class WeChatDownloader:
     """微信公众号文章下载器"""
@@ -64,7 +66,7 @@ class WeChatDownloader:
         # 1. 下载 HTML
         html_content = self._fetch_html(url)
         if not html_content:
-            return None, None, {}
+            return None, None, {}, ""
         
         print("   ✓ HTTP 请求成功")
         
@@ -93,7 +95,7 @@ class WeChatDownloader:
 
         # 6. 保存中文 Markdown
         zh_md_path = self._save_markdown(
-            title, markdown_content, image_map, warnings, url, article_dir, suffix="_zh"
+            title, markdown_content, image_map, url, article_dir, suffix="_zh"
         )
         
         # 7. 打印统计
@@ -278,7 +280,6 @@ class WeChatDownloader:
                 md_content = md_content.replace(placeholder_raw, img_md)
         else:
             # 普通文本转换
-            element = self._preprocess_element(element)
             md_content = md(str(element), heading_style="atx",
                             bullets="-", convert=['p', 'ul', 'ol', 'li', 'br', 'hr', 'em', 'strong'])
         
@@ -511,12 +512,8 @@ class WeChatDownloader:
         
         return ""
     
-    def _preprocess_element(self, element: Tag) -> Tag:
-        """预处理元素"""
-        return element
-    
-    def _save_markdown(self, title: str, markdown: str, image_map: Dict, 
-                       warnings: List, url: str, article_dir: str, 
+    def _save_markdown(self, title: str, markdown: str, image_map: Dict,
+                       url: str, article_dir: str,
                        suffix: str = "_zh") -> str:
         """保存 Markdown 文件"""
         safe_title = "".join([c for c in title if c not in r'/:*?"<>|']).strip()[:80]
@@ -626,12 +623,8 @@ class WeChatDownloader:
 
     @staticmethod
     def _find_image_by_basename(img_dir: str, basename: str) -> Optional[str]:
-        """根据 basename（不含扩展名）找到实际文件路径"""
-        for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']:
-            fpath = os.path.join(img_dir, f'{basename}{ext}')
-            if os.path.exists(fpath):
-                return fpath
-        return None
+        """根据 basename（不含扩展名）找到实际文件路径（委托 utils）"""
+        return find_file_by_basename(img_dir, basename)
 
     def _print_statistics(self, image_map: Dict, warnings: List,
                           md_path: str, article_dir: str):
@@ -668,7 +661,7 @@ def test_downloader():
     test_url = input("请输入微信文章链接进行测试: ").strip()
     
     if test_url:
-        markdown, article_dir, image_map = downloader.download(test_url)
+        markdown, article_dir, image_map, title = downloader.download(test_url)
         if markdown:
             print(f"\n✓ 测试成功")
             print(f"  - 内容长度: {len(markdown)}")

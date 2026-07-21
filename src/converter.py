@@ -18,6 +18,10 @@ from datetime import date
 from openai import OpenAI
 from typing import Dict, Optional, List, Tuple
 
+from utils import (
+    resolve_llm_config, clean_llm_response, find_file_by_suffix,
+)
+
 # 设置输出编码
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -77,44 +81,12 @@ class BlogConverter:
             return yaml.safe_load(f)
 
     def _resolve_llm_config(self, llm_name: str = None) -> dict:
-        """解析 LLM 配置，支持新旧两种格式（详见 translator.py）"""
-        llm_cfg = self.config.get('llm', {})
-
-        # 旧格式兼容
-        if 'api_key' in llm_cfg:
-            return {
-                'name': 'default',
-                'api_key': llm_cfg['api_key'],
-                'base_url': llm_cfg.get('base_url', ''),
-                'model_name': llm_cfg.get('model_name', ''),
-            }
-
-        # 新格式
-        providers = llm_cfg.get('providers', {})
-        if not providers:
-            raise ValueError("config.yaml 中未配置任何 LLM 提供商")
-
-        name = llm_name or llm_cfg.get('default')
-        if name not in providers:
-            available = ', '.join(providers.keys())
-            raise ValueError(
-                f"LLM 提供商 '{name}' 未在 config.yaml 中配置。"
-                f" 可用: {available}"
-            )
-
-        provider = providers[name].copy()
-        provider['name'] = name
-        return provider
+        """解析 LLM 配置（委托 utils.resolve_llm_config，支持新旧格式）"""
+        return resolve_llm_config(self.config, llm_name)
 
     def _clean_response(self, content: str) -> str:
-        """去除 LLM 可能包裹的代码块标记"""
-        content = content.strip()
-        for prefix in ('```json', '```yaml', '```markdown', '```'):
-            if content.startswith(prefix):
-                content = content[len(prefix):]
-        if content.endswith('```'):
-            content = content[:-3]
-        return content.strip()
+        """去除 LLM 可能包裹的代码块标记（委托 utils.clean_llm_response）"""
+        return clean_llm_response(content)
 
     # ------------------------------------------------------------------
     # 核心转换流程
@@ -196,11 +168,8 @@ class BlogConverter:
     # ------------------------------------------------------------------
 
     def _find_file(self, directory: str, suffix: str) -> Optional[str]:
-        """在目录中查找以 suffix 结尾的文件"""
-        for name in os.listdir(directory):
-            if name.endswith(suffix):
-                return os.path.join(directory, name)
-        return None
+        """在目录中查找以 suffix 结尾的文件（委托 utils.find_file_by_suffix）"""
+        return find_file_by_suffix(directory, suffix)
 
     # ------------------------------------------------------------------
     # 解析翻译输出
@@ -284,7 +253,6 @@ class BlogConverter:
         lines = body.split('\n')
         kept: List[str] = []
         in_metadata = True
-        blank_streak = 0
 
         for line in lines:
             stripped = line.strip()
@@ -322,7 +290,7 @@ class BlogConverter:
     # ------------------------------------------------------------------
 
     def _convert_latex_to_html(self, body: str) -> str:
-        """
+        r"""
         将 LaTeX 公式转换为 codecogs SVG 图片，适用于不支持 MathJax 的博客。
 
         支持四种语法:
