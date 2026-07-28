@@ -153,17 +153,43 @@ class WeChatTranslatePipeline:
         if self.oss_uploader:
             post_date = date.today().isoformat()
             oss_folder = self.converter.make_oss_folder(category, post_date)
-            print(f"\n[Step 4/6] 上传图片到 OSS ({oss_folder})...")
+
+            # 统计可上传图片
+            images_dir = os.path.join(article_dir, 'images')
+            uploadable = 0
+            if os.path.isdir(images_dir):
+                from utils import IMAGE_EXTENSIONS
+                uploadable = sum(
+                    1 for f in os.listdir(images_dir)
+                    if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
+                )
+
+            print(f"\n[Step 4/6] 上传图片到 OSS")
+            print(f"   目标: {self.oss_uploader.bucket}.{self.oss_uploader.endpoint}")
+            print(f"   文件夹: {oss_folder}")
+            print(f"   图片: {uploadable} 张")
+            print(f"   提示: 如需修改图片（替换/删除/编辑），请现在操作")
+            print(f"   图片目录: {images_dir}")
+
             while True:
-                try:
-                    self.oss_uploader.upload_and_update_map(
-                        article_dir, image_map, oss_folder
-                    )
+                choice = input("   [1] 确认上传  [2] 跳过: ").strip()
+                if choice == '1':
+                    while True:
+                        try:
+                            self.oss_uploader.upload_and_update_map(
+                                article_dir, image_map, oss_folder
+                            )
+                            break
+                        except Exception as e:
+                            if not _ask_retry("OSS 上传", str(e)):
+                                print("   ⚠️ 跳过 OSS 上传，使用原始 URL")
+                                break
                     break
-                except Exception as e:
-                    if not _ask_retry("OSS 上传", str(e)):
-                        print("   ⚠️ 跳过 OSS 上传，使用原始 URL")
-                        break
+                elif choice == '2':
+                    print("   ⏭️ 已跳过 OSS 上传（使用原始 URL）")
+                    break
+                else:
+                    print("   请输入 1 或 2")
         else:
             print(f"\n[Step 4/6] OSS 未配置，跳过上传")
 
