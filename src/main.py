@@ -27,6 +27,7 @@ from translator import Translator
 from converter import BlogConverter
 from oss_uploader import create_uploader
 from github_uploader import create_uploader as create_github_uploader
+from decorative_filter import build_hash_library
 
 
 # ===================================================================
@@ -109,9 +110,20 @@ class WeChatTranslatePipeline:
         print(f"   ✓ 标题: {title}")
         print(f"   ✓ 图片: {len(image_map)} 张")
 
+        # ── 翻译确认断点 ──
+        print(f"\n[Step 2/6] 翻译")
+        while True:
+            choice = input("   是否调用 LLM 翻译？[1] 确认翻译  [2] 跳过: ").strip()
+            if choice == '1':
+                break
+            if choice == '2':
+                print("   ⏭️ 已跳过翻译，流程结束")
+                print(f"   📁 中文版本已保存: {article_dir}")
+                return article_dir
+            print("   请输入 1 或 2")
+
         # ── Step 2: 翻译 + 审核 ──
-        print(f"\n[Step 2/6] 翻译 + 审核 "
-              f"({self.translator.provider_name}/{self.translator.model})...")
+        print(f"   翻译中 ({self.translator.provider_name}/{self.translator.model})...")
         while True:
             try:
                 en_markdown, review_result = self.translator.translate_with_review(
@@ -153,17 +165,43 @@ class WeChatTranslatePipeline:
         if self.oss_uploader:
             post_date = date.today().isoformat()
             oss_folder = self.converter.make_oss_folder(category, post_date)
-            print(f"\n[Step 4/6] 上传图片到 OSS ({oss_folder})...")
+
+            # 统计可上传图片
+            images_dir = os.path.join(article_dir, 'images')
+            uploadable = 0
+            if os.path.isdir(images_dir):
+                from utils import IMAGE_EXTENSIONS
+                uploadable = sum(
+                    1 for f in os.listdir(images_dir)
+                    if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
+                )
+
+            print(f"\n[Step 4/6] 上传图片到 OSS")
+            print(f"   目标: {self.oss_uploader.bucket}.{self.oss_uploader.endpoint}")
+            print(f"   文件夹: {oss_folder}")
+            print(f"   图片: {uploadable} 张")
+            print(f"   提示: 如需修改图片（替换/删除/编辑），请现在操作")
+            print(f"   图片目录: {images_dir}")
+
             while True:
-                try:
-                    self.oss_uploader.upload_and_update_map(
-                        article_dir, image_map, oss_folder
-                    )
+                choice = input("   [1] 确认上传  [2] 跳过: ").strip()
+                if choice == '1':
+                    while True:
+                        try:
+                            self.oss_uploader.upload_and_update_map(
+                                article_dir, image_map, oss_folder
+                            )
+                            break
+                        except Exception as e:
+                            if not _ask_retry("OSS 上传", str(e)):
+                                print("   ⚠️ 跳过 OSS 上传，使用原始 URL")
+                                break
                     break
-                except Exception as e:
-                    if not _ask_retry("OSS 上传", str(e)):
-                        print("   ⚠️ 跳过 OSS 上传，使用原始 URL")
-                        break
+                elif choice == '2':
+                    print("   ⏭️ 已跳过 OSS 上传（使用原始 URL）")
+                    break
+                else:
+                    print("   请输入 1 或 2")
         else:
             print(f"\n[Step 4/6] OSS 未配置，跳过上传")
 
@@ -403,6 +441,16 @@ def interactive_mode():
     pipeline = WeChatTranslatePipeline(
         llm_name=provider, model_name=model, silent=True
     )
+
+    # 哈希库更新提示（进文章循环前问一次）
+    print(f"\n{'─' * 60}")
+    print("🧹 装饰图过滤")
+    update = input("是否更新装饰图哈希库？[1] 更新  [Enter] 跳过: ").strip()
+    if update == '1':
+        count = build_hash_library()
+        if count == 0:
+            print("   💡 提示: 将装饰图放入 data/decorative_samples/ 后重新运行 --build")
+    print(f"{'─' * 60}")
 
     # 主循环：输入链接 → 全自动处理
     while True:

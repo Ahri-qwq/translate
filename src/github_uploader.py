@@ -22,6 +22,8 @@ import subprocess
 import sys
 from typing import Dict, Optional
 
+from utils import find_file_by_suffix
+
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -461,13 +463,8 @@ class GitHubUploader:
 
     @staticmethod
     def _find_en_md(article_dir: str) -> Optional[str]:
-        """在文章目录中查找 _en.md 文件。"""
-        if not os.path.isdir(article_dir):
-            return None
-        for name in os.listdir(article_dir):
-            if name.endswith('_en.md'):
-                return os.path.join(article_dir, name)
-        return None
+        """在文章目录中查找 _en.md 文件（委托 utils.find_file_by_suffix）。"""
+        return find_file_by_suffix(article_dir, '_en.md')
 
     def _build_pr_body(self, meta: dict) -> str:
         """根据元数据构建 PR body。"""

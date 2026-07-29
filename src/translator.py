@@ -16,6 +16,8 @@ import yaml
 from openai import OpenAI
 from typing import Tuple, Dict, Optional
 
+from utils import resolve_llm_config, clean_llm_response
+
 # 设置输出编码
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -62,51 +64,9 @@ class Translator:
             return yaml.safe_load(f)
 
     def _resolve_llm_config(self, llm_name: str = None) -> dict:
-        """
-        解析 LLM 配置，支持新旧两种格式。
+        """解析 LLM 配置（委托 utils.resolve_llm_config，支持新旧格式）"""
+        return resolve_llm_config(self.config, llm_name)
 
-        新格式（多提供商）:
-            llm:
-              default: "qwen"
-              providers:
-                qwen: {api_key, base_url, model_name}
-                deepseek: {api_key, base_url, model_name}
-
-        旧格式（单提供商，向后兼容）:
-            llm:
-              api_key: "..."
-              base_url: "..."
-              model_name: "..."
-        """
-        llm_cfg = self.config.get('llm', {})
-
-        # 旧格式：llm 下直接有 api_key
-        if 'api_key' in llm_cfg:
-            return {
-                'name': 'default',
-                'api_key': llm_cfg['api_key'],
-                'base_url': llm_cfg.get('base_url', ''),
-                'model_name': llm_cfg.get('model_name', ''),
-            }
-
-        # 新格式：llm.providers
-        providers = llm_cfg.get('providers', {})
-        if not providers:
-            raise ValueError("config.yaml 中未配置任何 LLM 提供商")
-
-        # 选择提供商
-        name = llm_name or llm_cfg.get('default')
-        if name not in providers:
-            available = ', '.join(providers.keys())
-            raise ValueError(
-                f"LLM 提供商 '{name}' 未在 config.yaml 中配置。"
-                f" 可用: {available}"
-            )
-
-        provider = providers[name].copy()
-        provider['name'] = name
-        return provider
-    
     def translate_markdown(self, markdown_content: str, title: str = None) -> str:
         """
         翻译 Markdown 内容
@@ -177,16 +137,8 @@ REMEMBER: Start your output with # <translated title>. Output pure Markdown only
             raise
     
     def _clean_response(self, content: str) -> str:
-        """清理 API 返回内容"""
-        # 移除可能的代码块包装
-        if content.startswith('```markdown'):
-            content = content[12:]
-        if content.startswith('```'):
-            content = content[3:]
-        if content.endswith('```'):
-            content = content[:-3]
-        
-        return content.strip()
+        """清理 API 返回内容（委托 utils.clean_llm_response）"""
+        return clean_llm_response(content)
     
     # ------------------------------------------------------------------
     # 交叉审查客户端
@@ -331,15 +283,8 @@ Output ONLY the JSON review result."""
             max_tokens=8000,
         )
 
-        result_text = response.choices[0].message.content.strip()
-        if result_text.startswith('```json'):
-            result_text = result_text[7:]
-        if result_text.startswith('```'):
-            result_text = result_text[3:]
-        if result_text.endswith('```'):
-            result_text = result_text[:-3]
-
-        return json.loads(result_text.strip())
+        result_text = clean_llm_response(response.choices[0].message.content)
+        return json.loads(result_text)
 
     @staticmethod
     def _merge_issues(primary: list, secondary: list) -> list:
@@ -460,18 +405,9 @@ Output ONLY the JSON review result."""
                 max_tokens=8000,
             )
             
-            result_text = response.choices[0].message.content.strip()
-            
-            # 解析 JSON
-            # 移除可能的 markdown 代码块包装
-            if result_text.startswith('```json'):
-                result_text = result_text[7:]
-            if result_text.startswith('```'):
-                result_text = result_text[3:]
-            if result_text.endswith('```'):
-                result_text = result_text[:-3]
-            
-            result = json.loads(result_text.strip())
+            # 解析 JSON（清理可能的 markdown 代码块包装）
+            result_text = clean_llm_response(response.choices[0].message.content)
+            result = json.loads(result_text)
             
             # 打印审核结果
             score = result.get('score', 0)
@@ -636,56 +572,6 @@ Output the complete revised English translation as pure Markdown (no code blocks
 
         return en_content, review_result
     
-    def translate_batch(self, markdown_files: list, output_dir: str) -> dict:
-        """
-        批量翻译多个 Markdown 文件
-        
-        参数:
-            markdown_files: 文件路径列表
-            output_dir: 输出目录
-            
-        返回:
-            翻译结果映射 {原文件: 翻译文件}
-        """
-        results = {}
-        
-        for zh_file in markdown_files:
-            try:
-                # 读取中文内容
-                with open(zh_file, 'r', encoding='utf-8') as f:
-                    zh_content = f.read()
-                
-                # 提取标题（从文件名或内容）
-                title = self._extract_title_from_content(zh_content)
-                
-                # 翻译
-                en_content = self.translate_markdown(zh_content, title)
-                
-                # 生成英文文件名
-                zh_filename = os.path.basename(zh_file)
-                en_filename = zh_filename.replace('_zh.md', '_en.md').replace('.md', '_en.md')
-                en_file = os.path.join(output_dir, en_filename)
-                
-                # 保存
-                with open(en_file, 'w', encoding='utf-8') as f:
-                    f.write(en_content)
-                
-                results[zh_file] = en_file
-                print(f"   ✓ 保存: {en_filename}")
-                
-            except Exception as e:
-                print(f"   ❌ 失败: {zh_file} - {e}")
-                results[zh_file] = None
-        
-        return results
-    
-    def _extract_title_from_content(self, content: str) -> str:
-        """从 Markdown 内容提取标题"""
-        match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-        if match:
-            return match.group(1).strip()
-        return None
-
 
 def test_translator():
     """测试翻译器"""

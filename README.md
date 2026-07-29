@@ -5,6 +5,7 @@
 ## 🎯 功能
 
 - 下载微信公众号文章（内容 + 图片）
+- **装饰图自动过滤**：基于感知哈希（pHash）识别并过滤模板装饰图
 - **智能图片重编号**：按正文出现顺序统一重编号为 pic1/pic2/...
 - 多 LLM 翻译（支持 Qwen / DeepSeek，可随时切换对比）
 - **LLM 自动审核**翻译质量（支持双模型交叉审查）
@@ -24,15 +25,20 @@ translate/
 ├── config.yaml              # LLM + OSS + 审查 + GitHub 多合一配置（不入库）
 ├── config.yaml.example      # 配置文件模板（可入库，供新用户参考）
 ├── .gitignore               # 排除敏感配置和输出文件
+├── models/
+│   └── decorative_hashes.json # 装饰图哈希库（由 --build 生成）
 ├── requirements.txt         # Python 依赖
 ├── src/
 │   ├── main.py              # 主入口（交互 / 命令行 / 批量）
-│   ├── downloader.py        # 下载 + 图片重编号
+│   ├── downloader.py        # 下载 + 图片重编号 + 装饰图过滤
 │   ├── translator.py        # LLM 翻译 + 审核 + 交叉审查
 │   ├── converter.py         # 格式转换 + 公式转换 + LLM 分类
 │   ├── oss_uploader.py      # 阿里云 OSS 图片上传
-│   └── github_uploader.py   # GitHub PR 自动提交
+│   ├── github_uploader.py   # GitHub PR 自动提交
+│   ├── decorative_filter.py # 装饰图 pHash 过滤器
+│   └── utils.py             # 共享工具函数
 ├── data/
+│   ├── decorative_samples/     # 装饰图样本（手动放入，用于构建哈希库）
 │   ├── OSS/oss工具.md         # 阿里云 OSS 工具文档索引
 │   ├── Todo.md                 # 任务列表
 │   ├── formula-handling.md     # 公式处理问题记录
@@ -76,6 +82,9 @@ deepseek 可用模型:
 
 模型: 2
 
+🧹 装饰图过滤
+是否更新装饰图哈希库？[1] 更新  [Enter] 跳过:
+
 微信文章链接 [回车退出]: https://mp.weixin.qq.com/s/xxx
 ```
 
@@ -103,6 +112,9 @@ python src/oss_uploader.py --dir output/article_xxx
 # 单独运行 GitHub 上传
 python src/github_uploader.py --dir output/article_xxx
 python src/github_uploader.py --file output/article_xxx/blog_output/xxx.md
+
+# 构建装饰图哈希库
+python src/decorative_filter.py --build
 ```
 
 ### 批量处理文件格式
@@ -113,6 +125,22 @@ https://mp.weixin.qq.com/s/xxx1
 https://mp.weixin.qq.com/s/xxx2
 https://mp.weixin.qq.com/s/xxx3
 ```
+
+### 装饰图过滤
+
+微信公众号模板装饰图（顶部横幅、分割线、底部二维码等）是同一批固定图片反复出现。本项目用感知哈希（pHash）自动识别并过滤。
+
+**初始化**（一次性）：
+
+```bash
+# 1. 将标记好的装饰图放入 data/decorative_samples/（平铺，无需分类子目录）
+# 2. 构建哈希库
+python src/decorative_filter.py --build
+```
+
+**日常维护**：发现新装饰图时，扔进 `data/decorative_samples/` 重新 `--build` 即可。
+
+过滤行为：命中图片自动移至 `images/_filtered/`（可恢复），markdown 引用同步删除。哈希库不存在时静默跳过，不影响下载。
 
 ## 📦 安装依赖
 
@@ -128,6 +156,8 @@ pip install -r requirements.txt
 - `markdownify` — HTML 转 Markdown
 - `openai` — LLM API 调用（兼容 OpenAI / DeepSeek / DashScope）
 - `pyyaml` — 配置文件解析
+- `imagehash` — 感知哈希（装饰图过滤）
+- `Pillow` — 图片处理
 
 ### 外部工具（可选）
 
@@ -234,10 +264,12 @@ gh auth login               # 登录
 [Step 1/6] 下载文章
     ├── 提取正文、标题、公式
     ├── 智能图片重编号（按出现顺序 pic1/pic2/...）
+    ├── 装饰图 pHash 过滤（命中图片移至 _filtered/）
     ├── 跳过音视频内容并标注
     └── 生成中文 Markdown + images_map.txt
 
-[Step 2/6] LLM 翻译 + 审核
+[Step 2/6] 交互确认 → LLM 翻译 + 审核
+    ├── 询问用户是否翻译（可跳过，仅保留中文版）
     ├── 中文 → 英文翻译（保留公式、图片、Markdown 语法）
     ├── LLM 审核（漏译 / 术语 / 格式）
     ├── 交叉审查（可选）：双模型独立审查，合并报告
