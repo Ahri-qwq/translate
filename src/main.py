@@ -27,6 +27,7 @@ from translator import Translator
 from converter import BlogConverter
 from oss_uploader import create_uploader
 from github_uploader import create_uploader as create_github_uploader
+from decorative_filter import build_hash_library
 
 
 # ===================================================================
@@ -109,9 +110,20 @@ class WeChatTranslatePipeline:
         print(f"   ✓ 标题: {title}")
         print(f"   ✓ 图片: {len(image_map)} 张")
 
+        # ── 翻译确认断点 ──
+        print(f"\n[Step 2/6] 翻译")
+        while True:
+            choice = input("   是否调用 LLM 翻译？[1] 确认翻译  [2] 跳过: ").strip()
+            if choice == '1':
+                break
+            if choice == '2':
+                print("   ⏭️ 已跳过翻译，流程结束")
+                print(f"   📁 中文版本已保存: {article_dir}")
+                return article_dir
+            print("   请输入 1 或 2")
+
         # ── Step 2: 翻译 + 审核 ──
-        print(f"\n[Step 2/6] 翻译 + 审核 "
-              f"({self.translator.provider_name}/{self.translator.model})...")
+        print(f"   翻译中 ({self.translator.provider_name}/{self.translator.model})...")
         while True:
             try:
                 en_markdown, review_result = self.translator.translate_with_review(
@@ -429,6 +441,16 @@ def interactive_mode():
     pipeline = WeChatTranslatePipeline(
         llm_name=provider, model_name=model, silent=True
     )
+
+    # 哈希库更新提示（进文章循环前问一次）
+    print(f"\n{'─' * 60}")
+    print("🧹 装饰图过滤")
+    update = input("是否更新装饰图哈希库？[1] 更新  [Enter] 跳过: ").strip()
+    if update == '1':
+        count = build_hash_library()
+        if count == 0:
+            print("   💡 提示: 将装饰图放入 data/decorative_samples/ 后重新运行 --build")
+    print(f"{'─' * 60}")
 
     # 主循环：输入链接 → 全自动处理
     while True:
