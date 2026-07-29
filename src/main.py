@@ -450,6 +450,9 @@ def interactive_mode():
         count = build_hash_library()
         if count == 0:
             print("   💡 提示: 将装饰图放入 data/decorative_samples/ 后重新运行 --build")
+        else:
+            # 重建后重载过滤器内存数据
+            pipeline.downloader.decorative_filter._load()
     print(f"{'─' * 60}")
 
     # 主循环：输入链接 → 全自动处理

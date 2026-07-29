@@ -46,16 +46,21 @@ class DecorativeFilter:
         if hash_library_path is None:
             hash_library_path = DEFAULT_HASH_LIB
 
+        self.hash_library_path = hash_library_path
         self.threshold = threshold
         self.known_hashes: list = []
+        self._load()
 
-        if os.path.exists(hash_library_path):
-            with open(hash_library_path, 'r', encoding='utf-8') as f:
+    def _load(self):
+        """从 JSON 文件加载哈希库到内存"""
+        self.known_hashes = []
+        if os.path.exists(self.hash_library_path):
+            with open(self.hash_library_path, 'r', encoding='utf-8') as f:
                 self.known_hashes = json.load(f)
             print(f"   🧹 装饰图过滤器: 已加载 {len(self.known_hashes)} 条哈希")
         else:
-            print(f"   🧹 装饰图过滤器: 哈希库不存在 ({hash_library_path})，"
-                  f"跳过过滤")
+            print(f"   🧹 装饰图过滤器: 哈希库不存在 "
+                  f"({self.hash_library_path})，跳过过滤")
 
     def is_decorative(self, image_path: str) -> Tuple[bool, Optional[str]]:
         """
