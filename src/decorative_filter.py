@@ -163,11 +163,11 @@ def _find_image_by_basename(directory: str, basename: str) -> Optional[str]:
 def build_hash_library(samples_dir: str = None,
                        output_file: str = None) -> int:
     """
-    扫描 samples_dir 下的子文件夹，为每张图片计算 pHash，
-    写入 JSON 哈希库。子文件夹名自动作为 label。
+    扫描 samples_dir 下所有图片，计算 pHash，写入 JSON 哈希库。
+    图片直接平放在目录中即可，无需分类子文件夹。
 
     参数:
-        samples_dir: 样本图片根目录（默认 data/decorative_samples/）
+        samples_dir: 样本图片目录（默认 data/decorative_samples/）
         output_file: 输出 JSON 路径（默认 models/decorative_hashes.json）
 
     返回:
@@ -180,37 +180,33 @@ def build_hash_library(samples_dir: str = None,
 
     if not os.path.isdir(samples_dir):
         print(f"❌ 样本目录不存在: {samples_dir}")
-        print(f"   请创建目录并按类型放入装饰图，例如:")
-        print(f"   {samples_dir}/banner_top/")
-        print(f"   {samples_dir}/divider/")
-        print(f"   {samples_dir}/qr_code/")
+        print(f"   请创建目录并放入装饰图:")
+        print(f"   mkdir {samples_dir}")
         return 0
 
     entries = []
 
-    for label in sorted(os.listdir(samples_dir)):
-        subdir = os.path.join(samples_dir, label)
-        if not os.path.isdir(subdir):
+    for fname in sorted(os.listdir(samples_dir)):
+        fpath = os.path.join(samples_dir, fname)
+        if os.path.isdir(fpath):
+            continue  # 跳过子文件夹（兼容旧结构）
+
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in IMAGE_EXTENSIONS:
             continue
 
-        for fname in sorted(os.listdir(subdir)):
-            ext = os.path.splitext(fname)[1].lower()
-            if ext not in IMAGE_EXTENSIONS:
-                continue
+        try:
+            img_hash = imagehash.phash(Image.open(fpath))
+        except Exception as e:
+            print(f"   ⚠️ 跳过 {fname}: {e}")
+            continue
 
-            fpath = os.path.join(subdir, fname)
-            try:
-                img_hash = imagehash.phash(Image.open(fpath))
-            except Exception as e:
-                print(f"   ⚠️ 跳过 {fpath}: {e}")
-                continue
-
-            entries.append({
-                "hash": str(img_hash),
-                "label": label,
-                "source": fname,
-            })
-            print(f"   ✓ {label}/{fname} → {img_hash}")
+        entries.append({
+            "hash": str(img_hash),
+            "label": "decorative",
+            "source": fname,
+        })
+        print(f"   ✓ {fname} → {img_hash}")
 
     # 确保输出目录存在
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -218,9 +214,8 @@ def build_hash_library(samples_dir: str = None,
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
-    label_count = len(set(e['label'] for e in entries))
     print(f"\n✅ 哈希库已生成: {output_file}")
-    print(f"   {len(entries)} 条记录，{label_count} 个标签")
+    print(f"   {len(entries)} 张装饰图")
 
     return len(entries)
 
@@ -250,6 +245,7 @@ if __name__ == "__main__":
     if args.build:
         count = build_hash_library(args.samples, args.output)
         if count == 0:
-            sys.exit(1)
+            print("   💡 提示: 将装饰图放入上述目录后重新运行即可")
+            sys.exit(0)
     else:
         parser.print_help()

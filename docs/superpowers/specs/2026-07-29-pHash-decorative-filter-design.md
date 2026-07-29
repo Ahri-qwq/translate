@@ -23,10 +23,8 @@
 
 ```
 data/decorative_samples/          ← 人工维护的原始样本（源数据）
-├── banner_top/                   ← 文件夹名 = 标签（自动识别）
-│   └── xxx.png
-├── divider/
-│   └── xxx.png
+├── a.png                          ← 所有装饰图平铺放置
+├── b.png
 └── ...
 
      | python src/decorative_filter.py --build
@@ -93,7 +91,7 @@ python src/decorative_filter.py --build --samples data/decorative_samples/
 
 ```bash
 # 新发现一张装饰图时：
-cp new_banner.png data/decorative_samples/banner_top/
+cp new_banner.png data/decorative_samples/
 python src/decorative_filter.py --build
 
 # 下次下载文章时自动生效
