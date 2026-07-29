@@ -25,6 +25,7 @@ from typing import Tuple, Dict, List, Optional
 from urllib.parse import urljoin
 
 from utils import find_file_by_basename
+from decorative_filter import DecorativeFilter
 
 
 class WeChatDownloader:
@@ -44,7 +45,10 @@ class WeChatDownloader:
         
         self.output_base = output_base
         os.makedirs(output_base, exist_ok=True)
-        
+
+        # 初始化装饰图过滤器
+        self.decorative_filter = DecorativeFilter()
+
         print(f"✓ 下载器初始化完成")
         print(f"  - 输出目录: {output_base}")
     
@@ -90,6 +94,15 @@ class WeChatDownloader:
         markdown_content, image_map = self._renumber_images(
             markdown_content, image_map, img_dir
         )
+
+        # 5c. 装饰图过滤：基于 pHash 黑名单过滤模板装饰图
+        markdown_content, image_map, filtered_count, __ = (
+            self.decorative_filter.filter_images(
+                img_dir, image_map, markdown_content
+            )
+        )
+        if filtered_count:
+            print(f"   🧹 共过滤 {filtered_count} 张装饰图 → images/_filtered/")
 
         print(f"   ✓ 正文长度: {len(markdown_content)} 字")
 
