@@ -107,11 +107,21 @@ class WeChatTranslatePipeline:
                 return None
 
         zh_markdown, article_dir, image_map, title = result
+        original_title = title   # 文件名基准，不随 Step 2 的改标题而变
         print(f"   ✓ 标题: {title}")
         print(f"   ✓ 图片: {len(image_map)} 张")
 
         # ── 翻译确认断点 ──
+        from utils import find_file_by_suffix
+        zh_md_path = find_file_by_suffix(article_dir, '_zh.md')
+
         print(f"\n[Step 2/6] 翻译")
+        print(f"   中文原文: {zh_md_path}")
+        print(f"   ── 这一步可以改什么 ──")
+        print(f"     • 中文标题 / 正文有问题（段落串行、公式乱、缺段）:")
+        print(f"       直接编辑上面这个 _zh.md，保存后按 1 —— 检测到改动就用改后的版本翻译")
+        print(f"     • 图片不归这一步管，留到 Step 4 再调")
+        print(f"     • 什么都不改: 直接按 1")
         while True:
             choice = input("   是否调用 LLM 翻译？[1] 确认翻译  [2] 跳过: ").strip()
             if choice == '1':
@@ -121,6 +131,14 @@ class WeChatTranslatePipeline:
                 print(f"   📁 中文版本已保存: {article_dir}")
                 return article_dir
             print("   请输入 1 或 2")
+
+        # 用户在断点处可能改过 _zh.md；改了就用改后的内容，没改则维持原样
+        if zh_md_path:
+            edited = self._read_edited_zh(zh_md_path, title, zh_markdown)
+            if edited is not None:
+                title, zh_markdown = edited
+                print(f"   ✏️ 检测到 _zh.md 已被修改，改用改后的中文原文")
+                print(f"      标题: {title}")
 
         # ── Step 2: 翻译 + 审核 ──
         print(f"   翻译中 ({self.translator.provider_name}/{self.translator.model})...")
@@ -140,8 +158,10 @@ class WeChatTranslatePipeline:
 
         # ── Step 3: 保存 ──
         print("\n[Step 3/6] 保存文件...")
+        # 文件名用原标题：Step 2 若改过中文标题，_en.md 仍与 _zh.md、
+        # images_map.txt 保持同一套文件名，避免同一次运行产出两套名字。
         en_md_path = self._save_en_version(
-            zh_markdown, en_markdown, title, url, article_dir,
+            zh_markdown, en_markdown, original_title, url, article_dir,
             image_map, review_result
         )
 
@@ -180,8 +200,19 @@ class WeChatTranslatePipeline:
             print(f"   目标: {self.oss_uploader.bucket}.{self.oss_uploader.endpoint}")
             print(f"   文件夹: {oss_folder}")
             print(f"   图片: {uploadable} 张")
-            print(f"   提示: 如需修改图片（替换/删除/编辑），请现在操作")
-            print(f"   图片目录: {images_dir}")
+            print(f"   ── 这一步可以改什么 ──")
+            print(f"     【改英文标题 / 正文】")
+            print(f"       编辑: {en_md_path}")
+            print(f"       第 1 行 # 后面就是最终标题，正文随意改 —— Step 5 直接用这个文件，改了就生效")
+            print(f"     【删掉多余的图】封面图/装饰图没被自动过滤掉时:")
+            print(f"       把图片文件移进 {images_dir}\\_filtered\\")
+            print(f"       → 只移文件即可，Step 5 会自动删掉正文里对应引用，不用手改任何文本")
+            print(f"     【替换某张图】用同名文件覆盖 {images_dir}\\ 里的原图")
+            print(f"     【什么都不改】直接按 1 继续")
+            print(f"   ⚠️ 别手改 images_map.txt（图片路径表），它由程序维护；")
+            print(f"      图片增删一律用「移文件」的方式，避免正文引用和实际文件对不上。")
+            print(f"   ℹ️ 图片一旦传到 OSS 不便撤回，所以确认放在这一步；")
+            print(f"      文字的修改不着急，Step 5 之前任何时候都还来得及。")
 
             while True:
                 choice = input("   [1] 确认上传  [2] 跳过: ").strip()
@@ -219,6 +250,12 @@ class WeChatTranslatePipeline:
             print(f"\n[Step 6/6] 上传 GitHub → PR")
             print(f"   前 5 步已完成，即将提交到 {self.github_uploader.repo}")
             print(f"   文件: {blog_basename}")
+            print(f"   ── 这一步可以改什么 ──")
+            print(f"     【最后检查一遍】即将提交的文件:")
+            print(f"       {blog_path}")
+            print(f"       改它就等于改 PR 内容 —— 上传用的就是这个文件，改完按 1 即可")
+            print(f"       重点看: frontmatter 的 title / categories、图片链接是否为 OSS 地址")
+            print(f"     【什么都不改】直接按 1")
 
             while True:
                 choice = input("   [1] 提交 PR  [2] 跳过: ").strip()
@@ -255,16 +292,54 @@ class WeChatTranslatePipeline:
     # 内部方法
     # ------------------------------------------------------------------
 
+    def _read_edited_zh(self, zh_md_path, title, zh_markdown):
+        """
+        检测用户在 Step 2 断点处是否改过 _zh.md。
+
+        下载时该文件写死为 "# {title}\\n\\n{body}"，把 (title, body) 复原成
+        同样的字符串与磁盘内容比对即可判断有没有被编辑——不需要哈希或时间戳，
+        也避免依赖文件 mtime（编辑器保存后 mtime 必然变化，无法区分内容是否真变）。
+
+        返回 (new_title, new_body)；未改动、读取失败或改空则返回 None。
+        """
+        try:
+            with open(zh_md_path, 'r', encoding='utf-8') as f:
+                current = f.read()
+        except OSError:
+            return None
+
+        if current.strip() == f"# {title}\n\n{zh_markdown}".strip():
+            return None  # 原样未动
+
+        lines = current.split('\n')
+        new_title, body_start = '', 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('# '):
+                new_title = line.strip()[2:].strip()
+                body_start = i + 1
+                break
+
+        body = '\n'.join(lines[body_start:]).strip()
+        if not body:
+            print("   ⚠️ _zh.md 内容为空，忽略改动，沿用原中文原文")
+            return None
+
+        return (new_title or title), body
+
     def _save_en_version(self, zh_content, en_content, title, url,
                          article_dir, image_map, review_result=None):
         """保存英文翻译"""
         import re
         safe_title = "".join(c for c in title if c not in r'/:*?"<>|').strip()[:80]
 
-        en_title_match = re.search(r'^#\s+(.+)$', en_content, re.MULTILINE)
+        # 只把「开头那一行 H1」当作文章标题取走。正文里的小节标题已在
+        # 抓取阶段降级为 ##，所以正常情况下开头这个 # 就是译文标题。
+        # 不能用 re.MULTILINE 全文搜索后无条件删除：若模型没输出标题行，
+        # 那样会把正文第一个小节标题误当标题吃掉（第一节标题凭空消失）。
+        en_title_match = re.match(r'^#\s+(.+?)\s*$', en_content.lstrip(), re.MULTILINE)
         if en_title_match:
             en_title = en_title_match.group(1).strip()
-            en_content = re.sub(r'^#\s+.+\n+', '', en_content, count=1)
+            en_content = re.sub(r'^\s*#\s+.+\n+', '', en_content, count=1)
             # 如果 LLM 输出的标题仍是中文，提示用户
             if re.search(r'[一-鿿]', en_title):
                 print(f"   ⚠️ 标题可能未翻译（含中文）: {en_title[:60]}")

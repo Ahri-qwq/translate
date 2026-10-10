@@ -102,9 +102,13 @@ class OSSUploader:
                 oss_url_map[local_name] = https_url
                 success_count += 1
             else:
-                # 保留原始微信 CDN URL 作为 fallback
-                oss_url_map[local_name] = image_map[local_name][0]
-                print(f"     ⚠️ {local_name} → 回退到原始 URL")
+                # 上传失败，保留原始微信 CDN URL 作为 fallback。
+                # 这里写入的是 map 文件（纯文本），不含 HTML 属性语义，
+                # 转换阶段会给 src 加引号，不会破坏页面解析。
+                fallback = image_map[local_name][0]
+                oss_url_map[local_name] = fallback
+                print(f"     ⚠️ {local_name} → 回退到原始 URL（可能失效或被防盗链）")
+                print(f"        {fallback[:80]}")
 
         print(f"     ✓ 成功: {success_count}/{len(targets)}")
 

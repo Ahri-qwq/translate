@@ -20,6 +20,7 @@ from typing import Dict, Optional, List, Tuple
 
 from utils import (
     resolve_llm_config, clean_llm_response, find_file_by_suffix,
+    find_file_by_basename,
 )
 
 # 设置输出编码
@@ -129,7 +130,9 @@ class BlogConverter:
         # ---- 清理 & 转换 ----
         body = self._strip_metadata_blockquotes(body)
         body = self._convert_latex_to_html(body)
-        body = self._convert_images(body, image_map)
+        body = self._convert_images(
+            body, image_map, os.path.join(article_dir, 'images')
+        )
         body = self._fix_figure_labels(body)
         body = self._fix_image_layout(body)
         body = self._insert_more_tag(body)
@@ -338,29 +341,59 @@ class BlogConverter:
     # 图片转换: ![alt](images/xxx.png) → <center><img src=url /></center>
     # ------------------------------------------------------------------
 
-    def _convert_images(self, body: str, image_map: Dict[str, str]) -> str:
+    def _convert_images(self, body: str, image_map: Dict[str, str],
+                        images_dir: str = None) -> str:
         """
         将 Markdown 图片语法转换为博客 HTML 格式。
 
         输入:  ![图1](images/img_001.png)
-        输出:  <center><img src=https://... pic_center width="100%" height="100%" /></center>
+        输出:  <center><img src="https://..." pic_center width="100%" height="100%" /></center>
+
+        参数:
+            images_dir: 本地 images 目录。目录存在时，本地文件已不存在的图片
+                        引用会被整行删除（对应「用户手动把图移进 _filtered/」）。
+                        目录不存在则不校验，避免误删全部图片。
         """
+        # 目录不存在时不启用本地文件校验（否则所有引用都会被判为失效）
+        check_local = bool(images_dir) and os.path.isdir(images_dir)
+        dropped: List[str] = []
 
         def replace_img(match: re.Match) -> str:
             alt = match.group(1)
             local_path = match.group(2)
             local_name = os.path.splitext(os.path.basename(local_path))[0]
 
-            # 查找远程 URL
-            remote_url = image_map.get(local_name, local_path)
+            # 本地文件已不存在（被手动移走 / 过滤），说明这张图不应出现在正文里。
+            # 必须删掉引用：否则会 fallback 到原始外链，而未加引号的 src= 一旦
+            # 遇到含 = & # 的 URL（微信图床就是），Hexo 会抛 Parse Error，
+            # 整页构建为 0 字节 → 线上白屏。
+            if check_local and not find_file_by_basename(images_dir, local_name):
+                dropped.append(local_name)
+                return ''
+
+            remote_url = image_map.get(local_name)
+            if not remote_url:
+                # 未上传且无本地文件，同样丢弃，不产出坏 HTML
+                dropped.append(local_name)
+                return ''
+
+            # src 一律加引号：URL 可能含 = & # 等字符，未加引号会破坏 HTML 解析
             return (
-                f'<center><img src={remote_url}'
+                f'<center><img src="{remote_url}"'
                 f' pic_center width="100%" height="100%" /></center>'
             )
 
         # 匹配 ![alt](path)  —— 不匹配已经是 HTML 的 <img
         pattern = r'!\[([^\]]*)\]\(([^)]+)\)'
-        return re.sub(pattern, replace_img, body)
+        body = re.sub(pattern, replace_img, body)
+
+        if dropped:
+            print(f"  🧹 已移除 {len(dropped)} 处失效图片引用: "
+                  f"{', '.join(sorted(set(dropped)))}")
+            # 清理因删除图片行留下的多余空行
+            body = re.sub(r'\n{3,}', '\n\n', body)
+
+        return body
 
     # ------------------------------------------------------------------
     # <!-- more --> 插入
