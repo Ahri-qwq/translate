@@ -90,6 +90,9 @@ class WeChatDownloader:
             soup, img_dir, url
         )
 
+        # 5a. 清理标题行（去掉 ****加粗**** 包裹、丢弃空标题）
+        markdown_content = self._clean_headings(markdown_content)
+
         # 5b. 重编号：img_001/002/003 → pic1/pic2/pic3（全部保留，不做筛选）
         markdown_content, image_map = self._renumber_images(
             markdown_content, image_map, img_dir
@@ -248,11 +251,17 @@ class WeChatDownloader:
                 return f"[{warning}]\n\n", img_counter, {}, warnings
         
         # 预处理：替换嵌套公式和图片为占位符，防止 markdownify 丢弃
-        has_nested = all_imgs or self._has_nested_formulas(element)
+        has_pre = True if element.name == 'pre' else bool(element.find('pre'))
+        has_nested = all_imgs or has_pre or self._has_nested_formulas(element)
         if has_nested:
             if all_imgs:
                 print(f"   ✓ 在 <{element.name}> 中发现 {len(all_imgs)} 个嵌套 img")
             element_copy = BeautifulSoup(str(element), 'html.parser').find(element.name)
+
+            # 先抽出代码块（须在公式/图片之前，避免误伤块内内容）
+            code_placeholders = self._replace_code_blocks(element_copy)
+            if code_placeholders:
+                print(f"   ✓ 在 <{element.name}> 中发现 {len(code_placeholders)} 个代码块")
 
             # 提取嵌套的行内公式，替换为占位符
             formula_placeholders = self._replace_nested_formulas(element_copy)
@@ -275,7 +284,14 @@ class WeChatDownloader:
 
             # markdownify 转换
             md_content = md(str(element_copy), heading_style="atx",
-                            bullets="-", convert=['p', 'ul', 'ol', 'li', 'br', 'hr', 'em', 'strong'])
+                            bullets="-", convert=['p', 'ul', 'ol', 'li', 'br', 'hr', 'em', 'strong',
+                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+
+            # 恢复代码块占位符
+            for placeholder, fenced in code_placeholders:
+                escaped = placeholder.replace('_', '\\_')
+                md_content = md_content.replace(escaped, fenced)
+                md_content = md_content.replace(placeholder, fenced)
 
             # 恢复公式占位符
             for placeholder, formula_md in formula_placeholders:
@@ -294,7 +310,8 @@ class WeChatDownloader:
         else:
             # 普通文本转换
             md_content = md(str(element), heading_style="atx",
-                            bullets="-", convert=['p', 'ul', 'ol', 'li', 'br', 'hr', 'em', 'strong'])
+                            bullets="-", convert=['p', 'ul', 'ol', 'li', 'br', 'hr', 'em', 'strong',
+                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
         
         md_content = re.sub(r'\n{3,}', '\n\n', md_content)
         
@@ -554,6 +571,108 @@ class WeChatDownloader:
         
         return md_path
     
+    def _extract_code_text(self, pre: Tag) -> str:
+        """
+        还原 <pre> 代码块的文本。
+
+        微信把代码按行拆成一串 <code>，彼此之间没有换行，直接
+        get_text() 会把所有行粘成一坨。这里按 <code> 逐行还原，
+        并把不换行空格（\xa0）复原成普通空格。
+        """
+        codes = pre.find_all('code')
+        if codes:
+            lines = [c.get_text().replace('\xa0', ' ').rstrip()
+                     for c in codes]
+        else:
+            lines = [ln.replace('\xa0', ' ').rstrip()
+                     for ln in pre.get_text().split('\n')]
+
+        # 去掉首尾空行，中间的空行保留
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        return '\n'.join(lines)
+
+    def _replace_code_blocks(self, element: Tag) -> List[Tuple[str, str]]:
+        """
+        把 <pre> 代码块换成占位符，防止 markdownify 把它拍平成正文。
+
+        返回 [(占位符, 围栏代码块 Markdown)]，markdownify 之后再还原。
+        """
+        placeholders = []
+        for i, pre in enumerate(element.find_all('pre')):
+            code_text = self._extract_code_text(pre)
+            if not code_text:
+                continue
+            placeholder = f'[CODE_PLACEHOLDER_{i}]'
+            fenced = '```\n' + code_text + '\n```'
+            placeholders.append((placeholder, fenced))
+            pre.replace_with(placeholder)
+        return placeholders
+
+    def _clean_headings(self, markdown: str) -> str:
+        """
+        清理 markdownify 产出的标题行。
+
+        微信/135editor 把小标题写成 <h1><strong>…</strong></h1>，转换后
+        变成 `# ****文字****`。标题本身已有强调语义，多套一层加粗既
+        冗余，也会干扰后续翻译和博客渲染。
+
+        同时重新定级。微信编辑器的小标题几乎都用 <h1>，层级也很随意
+        （常见 h1 和 h3 混用、跳过 h2）。一篇文章只应有一个 H1——文章
+        标题，由 _save_markdown 写在最前；正文里再出现 # 不符合规范，
+        也会影响博客目录生成。这里按出现过的层级排名映射成连续的
+        ## / ### / …，既压到 H1 之下，也不留空档。
+        """
+        out = []
+        headings = []
+        in_code = False
+        for line in markdown.split('\n'):
+            # 围栏代码块内部原样保留：里面的 # 是注释，不是标题
+            if line.lstrip().startswith('```'):
+                in_code = not in_code
+                out.append(line)
+                continue
+            if in_code:
+                out.append(line)
+                continue
+
+            m = re.match(r'^(#{1,6})\s*(.*)$', line)
+            if not m:
+                out.append(line)
+                continue
+
+            level, text = m.group(1), m.group(2).strip()
+
+            # 纯图片的标题行：源站把配图塞进 <h1>，还原成普通图片行
+            if re.fullmatch(r'(!\[[^\]]*\]\([^)]*\)\s*)+', text):
+                out.append(text)
+                continue
+
+            # 标题内的加粗一律去掉：既有整体包裹 ****文字****，
+            # 也有 ****使用教程********（副标题）**** 这种拼接残留
+            text = re.sub(r'\*{2,}', '', text).strip()
+
+            if not text:
+                # 空标题（源站拿它当间距用），直接丢弃
+                continue
+
+            headings.append((len(out), len(level), text))
+            out.append(None)  # 占位，稍后统一定级
+
+        # 统一定级：微信编辑器的层级很随意（这篇是 h1 和 h3，跳过了
+        # h2）。按出现过的层级排名重新映射成连续的 ## / ### / ...，
+        # 既保证正文最高只到 ##（H1 留给文章标题），也不留空档。
+        ranks = sorted({lv for _, lv, _ in headings})
+        level_map = {lv: min(i + 2, 6) for i, lv in enumerate(ranks)}
+        for idx, lv, text in headings:
+            out[idx] = f"{'#' * level_map[lv]} {text}"
+
+        # None 是上面留下的占位（理论上都已回填），保险起见过滤掉
+        return '\n'.join(l for l in out if l is not None)
+
     def _renumber_images(self, markdown: str, image_map: Dict,
                          img_dir: str) -> Tuple[str, Dict]:
         """

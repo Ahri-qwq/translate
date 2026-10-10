@@ -83,12 +83,24 @@ def clean_llm_response(content: str) -> str:
     清除首部标记和尾部 ```。
     """
     content = content.strip()
+
     for prefix in ('```json', '```yaml', '```markdown', '```'):
-        if content.startswith(prefix):
-            content = content[len(prefix):]
+        if not content.startswith(prefix):
+            continue
+
+        stripped = content[len(prefix):]
+        if stripped.endswith('```'):
+            stripped = stripped[:-3]
+
+        # 正文本身可能含有代码块（如教程里的 shell 命令）。若剥掉外层后
+        # 围栏数量变成奇数，说明刚才删掉的并不是包裹层，而是正文自己的
+        # 围栏——这种情况保持原样，否则会吃掉代码块的开头/结尾。
+        if stripped.count('```') % 2 != 0:
             break
-    if content.endswith('```'):
-        content = content[:-3]
+
+        content = stripped
+        break
+
     return content.strip()
 
 
