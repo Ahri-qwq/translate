@@ -659,6 +659,12 @@ class WeChatDownloader:
                 # 空标题（源站拿它当间距用），直接丢弃
                 continue
 
+            # 源站常把引言段落用 <h1> 包成大字正文（微信编辑器拿 h1 当样式
+            # 容器，不是语义标题）。真标题不会以句末标点结尾，据此还原成段落。
+            if re.search(r'[。；]\s*$', text):
+                out.append(text)
+                continue
+
             headings.append((len(out), len(level), text))
             out.append(None)  # 占位，稍后统一定级
 
