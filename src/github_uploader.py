@@ -137,6 +137,23 @@ class GitHubUploader:
         if not self._ensure_repo():
             return None
 
+        # 防呆：同名分支已有 open PR 时停下来，避免同一天多篇文章覆盖彼此。
+        # 必须放在 _ensure_repo() 之后：_find_existing_pr 依赖仓库目录存在作为 cwd。
+        existing_pr = self._find_existing_pr(branch_name)
+        if existing_pr:
+            print(f"\n  ⚠️  远端已存在同名分支的 open PR: {existing_pr}")
+            print(f"     分支名 {branch_name} 由「分类 + 日期」决定，")
+            print(f"     同一天同分类的第二篇文章会覆盖第一篇的 PR 和图片。")
+            print(f"     建议：改动博客文件名里的日期，或等明天再上传这篇。")
+            while True:
+                choice = input("  [1] 强制覆盖（我知道风险）  [2] 中止: ").strip()
+                if choice == '1':
+                    break
+                elif choice == '2':
+                    print("  ⏭️ 已中止 GitHub 上传")
+                    return None
+                print("  请输入 1 或 2")
+
         # Step 2: 同步 master
         if not self._sync_master():
             return None

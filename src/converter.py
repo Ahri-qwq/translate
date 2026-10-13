@@ -160,6 +160,21 @@ class BlogConverter:
         filename = self._make_filename(category, post_date)
         output_path = os.path.join(output_dir, filename)
 
+        # 防呆：同名文件已存在时停下来，避免同一天多篇文章互相覆盖
+        if os.path.exists(output_path):
+            print(f"\n  ⚠️  目标文件已存在: {output_path}")
+            print(f"     这通常意味着今天已经处理过一篇同分类的文章。")
+            print(f"     继续写入会覆盖之前的文件，图片如果同名也会在 OSS 上冲突。")
+            while True:
+                choice = input("  [1] 覆盖（我知道风险）  [2] 中止: ").strip()
+                if choice == '1':
+                    break
+                elif choice == '2':
+                    raise FileExistsError(
+                        f"用户中止：目标文件已存在: {output_path}"
+                    )
+                print("  请输入 1 或 2")
+
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(output)
 
