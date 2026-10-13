@@ -668,10 +668,8 @@ Remember: You MUST output exactly one category name. DO NOT output an empty resp
             # 夹在图片之间的加粗文本 = 章节标题
             return f'## {text}'
 
-        # 没有加粗标记的短文本：可能仍是标题
-        if len(text) <= 60 and not text.startswith('<'):
-            return f'## {text}'
-
+        # 没有加粗标记时保持原样：不能凭长度判断是否是标题，
+        # 否则会把段落开头的短句（如引言第一行）误升格为 ## 标题。
         return text
 
 
