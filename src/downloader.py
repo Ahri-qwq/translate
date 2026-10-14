@@ -321,6 +321,19 @@ class WeChatDownloader:
         """提取 MathJax/LaTeX 公式（支持 script、span、data-math 等多种格式）"""
         formula_text = ""
 
+        # 0) <mjx-container data-formula="..."> — 新版微信编辑器格式（2026+）
+        if element.name == 'mjx-container':
+            formula_text = element.get('data-formula', '')
+            if formula_text:
+                formula_type = element.get('data-formula-type', '')
+                # 微信用 block-equation / inline-equation；兼容 display 写法
+                is_display = any(
+                    kw in formula_type for kw in ('block', 'display')
+                )
+                if is_display:
+                    return f"$$\n{formula_text}\n$$"
+                return f"\\({formula_text}\\)"
+
         # 1) <script type="math/tex"> — 最可靠，直接是 LaTeX 源码
         if element.name == 'script' and element.get('type', '').startswith('math/tex'):
             formula_text = element.get_text(strip=True)
@@ -425,6 +438,9 @@ class WeChatDownloader:
                 'math-inline', 'math-display',
             )):
                 return True
+        # 找 <mjx-container data-formula="..."> — 新版微信编辑器格式
+        if element.find('mjx-container', attrs={'data-formula': True}):
+            return True
         return False
 
     def _replace_nested_formulas(self, element_copy: Tag) -> list:
@@ -461,6 +477,15 @@ class WeChatDownloader:
                     span.replace_with(placeholder)
                     placeholders.append((placeholder, formula_md))
                     idx += 1
+
+        # 3) <mjx-container data-formula="..."> — 新版微信编辑器格式
+        for container in element_copy.find_all('mjx-container', attrs={'data-formula': True}):
+            formula_md = self._extract_formula(container)
+            if formula_md:
+                placeholder = f'[FORMULA_NESTED_{idx}]'
+                container.replace_with(placeholder)
+                placeholders.append((placeholder, formula_md))
+                idx += 1
 
         return placeholders
     

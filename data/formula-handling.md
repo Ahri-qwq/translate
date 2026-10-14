@@ -17,6 +17,7 @@
 | MathJax span 块级 | `<span class="mjx-container">` | ⚠️ 需提取嵌套文本 | 已支持 |
 | MathJax span 行内 | `<span class="mjx-inline">` | ⚠️ 需提取嵌套文本 | 已支持 |
 | data-math 属性 | `<span data-math="E=mc^2">` | ✅ 容易 | 已支持 |
+| **mjx-container 自定义元素** | `<mjx-container data-formula="...">` | ✅ 容易 | 已支持（2026-10 修复） |
 | **CSS 模拟下标** | `<span style="vertical-align:sub; font-size:smaller">` | ❌ 不是 LaTeX | **无法提取** |
 
 ### 最后一种格式的问题
