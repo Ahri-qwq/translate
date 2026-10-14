@@ -10,7 +10,7 @@
 - 多 LLM 翻译（支持 Qwen / DeepSeek，可随时切换对比）
 - **LLM 自动审核**翻译质量（支持双模型交叉审查）
 - **OSS 图片上传**：自动上传到阿里云 OSS 并替换为 HTTPS 地址
-- **LaTeX 公式转换**：自动将 `$$...$$` / `\(...\)` / `\[...\]` 转换为 codecogs SVG 图片
+- **LaTeX 公式保留**：下载器从微信 HTML 提取 LaTeX 源码，转换器归一化为 `$...$` / `$$...$$`，交由站点 MathJax 渲染
 - 自动转换为博客格式（frontmatter + `<center><img>` + `<!-- more -->`）
 - LLM 自动分类（categories）
 - 全自动流水线：一条命令完成下载→翻译→审核→上传→转换→分类→GitHub PR
@@ -41,7 +41,8 @@ translate/
 │   ├── decorative_samples/     # 装饰图样本（手动放入，用于构建哈希库）
 │   ├── OSS/oss工具.md         # 阿里云 OSS 工具文档索引
 │   ├── Todo.md                 # 任务列表
-│   ├── formula-handling.md     # 公式处理问题记录
+│   ├── formula-handling.md     # 公式处理记录（格式 / 下载器 / 转换阶段）
+│   ├── 报告/                   # 各轮缺陷复盘与修复报告
 │   └── blog/source/_posts/     # 参考博客源文件（用于格式对齐）
 └── output/                  # 输出目录
     └── article_{时间戳}/
@@ -290,12 +291,12 @@ gh auth login               # 登录
 [Step 5/6] 格式转换 → 博客格式
     ├── LLM 自动分类（categories）
     ├── 清理翻译元数据块（> Source, > Translated by 等）
-    ├── LaTeX 公式 → codecogs SVG 图片
+    ├── LaTeX 公式归一化（\(...\) → $...$，交由 MathJax 渲染）
     ├── 图片语法转换（![](local) → <center><img src=url /></center>）
     ├── 图N → Figure N 自动翻译
     ├── 图片间加粗文本 → ## 二级标题
     ├── 自动插入 <!-- more -->（第一段落后）
-    ├── 自动检测 mathjax: true
+    ├── 自动检测 mathjax: true（含公式时写入，在归一化前检测以确保准确）
     └── 文件命名：{CATEGORY}_{YYYY}_{MM}_{DD}.md
 
 [Step 6/6] 上传 GitHub → PR

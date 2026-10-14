@@ -10,7 +10,17 @@
 优化内容：
 - [x] 1.翻译llm择优
 - [x] 2.图片筛选
-- [ ] 3.latex公式测试（官网没办法渲染Letax，需要转换成HTML）
+- [x] 3.latex公式测试（站点已全局加载 MathJax，转换器归一化为 $...$ 后可直接渲染，codecogs 方案已废弃）
 - [x] 4.图片过滤
 - [x] 5.代码交互性优化
 - [x] 6.代码鲁棒性检查
+
+公式修复（2026-10-14）：
+- [x] 下载器支持新版微信 `<mjx-container data-formula>` 格式（旧格式全部保留）
+- [x] 转换器改用 MathJax 渲染路径，修复深色模式不可见 + 检测时序 bug
+- [x] 已发布文章 ABACUS_2026_09_04 五处数值补回（PR #370）
+
+待处理：
+- [ ] `--download-only` 参数实际上会上传 OSS，与参数名不符，建议添加 `--no-upload` 选项
+- [ ] CSS 模拟下标格式（`vertical-align:sub`）的公式提取（无 LaTeX 源码，依赖 OCR）
+- [ ] Markdown 表格格式自动修复（微信表格 → 标准 Markdown 表格）
