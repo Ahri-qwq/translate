@@ -81,31 +81,43 @@ CSS 模拟下标（`vertical-align:sub`）不含 LaTeX 源码，下载器无法�
 
 ## 四、格式转换阶段公式处理
 
-### 问题
+### 现状（2026-10 改）
 
-deepmodeling/blog（Hexo）不支持 MathJax/LaTeX 渲染，`$$...$$` 和 `\(...\)` 会原样显示。
+`converter.py → _normalize_latex()` 将 `\(...\)`、`\[...\]` 归一化为
+`$...$`、`$$...$$`，交由站点已全局加载的 MathJax 3.2.2 渲染。
 
-### 解决方案：codecogs SVG API
+`_has_math_formula()` 在归一化前执行，检测到任意公式分隔符后向
+frontmatter 写入 `mathjax: true`，触发 NexT 主题的逐页 `enableMath` 开关。
 
-`converter.py → _convert_latex_to_html()`
+### 分隔符对照
 
-将 LaTeX 公式转为 codecogs SVG 图片，无外部依赖，纯 HTML `<img>` 即可显示。
-
-### 支持与不支持对比
-
-| 语法 | 支持 | 输出 |
+| 输入 | 输出 | 说明 |
 |------|------|------|
-| `$$E=mc^2$$` | ✅ | `<center><img src="...codecogs..."/></center>` |
-| `\(E=mc^2\)` | ✅ | `<img src="...codecogs...\inline" style="vertical-align:middle" />` |
-| `\[E=mc^2\]` | ✅（新增） | 同上块级 |
-| `$E=mc^2$` | ❌ | 不支持单 `$`（微信文章不会出现） |
+| `\(...\)` | `$...$` | 下载器从 `data-formula` 提取的原始形态 |
+| `\[...\]` | `$$...$$` | LLM 翻译有时生成 |
+| `$$...$$` | 原样保留 | 已是 MathJax 认识的块级形式 |
+| `$...$` | 原样保留 | 已是 MathJax 认识的行内形式 |
+
+### 为什么不再用 codecogs
+
+旧方案把公式转成 `<img src="https://latex.codecogs.com/...">` 外链图片。
+这条路径有三个问题：
+
+1. **深色模式不可见**：codecogs SVG 的 `fill="currentColor"` 在 `<img>` 独立
+   文档上下文里无法继承父页 CSS，回退为黑色；站点 `darkmode: true`，
+   主题 CSS 未对 `img` 做反色补偿，公式在深色背景上看不见。
+2. **时序 bug**：旧 `_has_math_formula()` 在 `_convert_latex_to_html()`
+   之后执行，此时公式已变成 `<img>` 标签，检测恒 False，`mathjax: true`
+   永远不加（虽然加了也没有意义，因为走的是图片路径）。
+3. **外部依赖**：仓库 104 篇已发布文章里 codecogs 用例为 0，`$...$` +
+   MathJax 用例 19 篇。
 
 ### 已处理的问题
 
-1. ✅ `$$...$$` 多行公式正确匹配（使用 `re.DOTALL`）
-2. ✅ `\[...\]` 格式新增支持（部分 LLM 翻译时会生成）
-3. ✅ URL 编码处理（`urllib.parse.quote`）
-4. ✅ 转换后 `_has_math_formula()` 自动检测不到公式 → `mathjax: true` 不再出现（正确行为）
+1. ✅ `_has_math_formula` 扩展为支持四种分隔符（`\(...\)` `\[...\]` `$$` `$`）
+2. ✅ `has_math` 在归一化前计算，传给 `_build_frontmatter(has_math=...)`
+3. ✅ codecogs URL 全部移除，`_convert_latex_to_html` 更名为 `_normalize_latex`
+4. ✅ 回归测试：无公式的文章不加 `mathjax: true`
 
 ---
 

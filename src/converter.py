@@ -129,7 +129,10 @@ class BlogConverter:
 
         # ---- 清理 & 转换 ----
         body = self._strip_metadata_blockquotes(body)
-        body = self._convert_latex_to_html(body)
+        # 公式检测必须在归一化之前：归一化后分隔符形态变化，
+        # 且旧实现会把公式转成图片，导致检测恒为 False。
+        has_math = self._has_math_formula(body)
+        body = self._normalize_latex(body)
         body = self._convert_images(
             body, image_map, os.path.join(article_dir, 'images')
         )
@@ -148,7 +151,7 @@ class BlogConverter:
         if post_date is None:
             post_date = date.today().isoformat()
 
-        frontmatter = self._build_frontmatter(title, post_date, category, body)
+        frontmatter = self._build_frontmatter(title, post_date, category, has_math)
         output = f"{frontmatter}\n{body}"
 
         # ---- 写入文件 ----
@@ -304,51 +307,37 @@ class BlogConverter:
         return '\n'.join(kept)
 
     # ------------------------------------------------------------------
-    # LaTeX 公式 → HTML（codecogs SVG 图片）
+    # LaTeX 公式归一化（保留给 MathJax 渲染）
     # ------------------------------------------------------------------
 
-    def _convert_latex_to_html(self, body: str) -> str:
+    def _normalize_latex(self, body: str) -> str:
         r"""
-        将 LaTeX 公式转换为 codecogs SVG 图片，适用于不支持 MathJax 的博客。
+        将 LaTeX 公式统一为 MathJax 可渲染的分隔符形式。
 
-        支持四种语法:
-          $$...$$   → 块级居中 SVG
-          \[...\]   → 块级居中 SVG（同 $$）
-          \\(...\\) → 行内 SVG
+        支持三种输入语法:
+          \\(...\\) → $...$
+          \\[...\]   → $$...$$
+          $$...$$  → 原样保留
+
+        历史说明：本方法此前把公式转成 codecogs SVG 图片外链，现已改为
+        保留文本交由站点 MathJax 渲染。原因是 codecogs 返回的 SVG 用
+        fill="currentColor"，作为 <img> 独立文档加载时无法继承父页 CSS，
+        在站点 darkmode 下回退为黑色，深色背景上看不见；且主题未对 img
+        做反色补偿。文字公式同时可复制、可搜索，并免去外部服务依赖。
         """
-        import urllib.parse
-
-        def _encode(latex: str) -> str:
-            return urllib.parse.quote(latex.strip(), safe='')
-
-        # 块级公式（居中显示）
-        def _replace_display(m: re.Match) -> str:
-            encoded = _encode(m.group(1))
-            return (
-                f'<center><img src="https://latex.codecogs.com/svg.image?'
-                f'{encoded}" /></center>'
-            )
-
-        # $$...$$（支持跨行）
-        body = re.sub(
-            r'\$\$\s*(.+?)\s*\$\$',
-            _replace_display, body, flags=re.DOTALL,
-        )
-        # \[...\]（支持跨行，部分 LLM 会生成这种格式）
+        # \[...\] → $$...$$（先处理，避免被后续规则误伤）
         body = re.sub(
             r'\\\[\s*(.+?)\s*\\\]',
-            _replace_display, body, flags=re.DOTALL,
+            lambda m: f'$$\n{m.group(1)}\n$$',
+            body, flags=re.DOTALL,
         )
 
-        # 行内公式 \(...\)
-        def _replace_inline(m: re.Match) -> str:
-            encoded = _encode(m.group(1))
-            return (
-                f'<img src="https://latex.codecogs.com/svg.image?\\inline '
-                f'{encoded}" style="vertical-align:middle" />'
-            )
-
-        body = re.sub(r'\\\(\s*(.+?)\s*\\\)', _replace_inline, body)
+        # \(...\) → $...$
+        body = re.sub(
+            r'\\\(\s*(.+?)\s*\\\)',
+            lambda m: f'${m.group(1)}$',
+            body, flags=re.DOTALL,
+        )
 
         return body
 
@@ -533,10 +522,16 @@ Remember: You MUST output exactly one category name. DO NOT output an empty resp
     # ------------------------------------------------------------------
 
     def _build_frontmatter(self, title: str, post_date: str,
-                           category: str, body: str) -> str:
-        """生成 YAML frontmatter 块，仅当文章含数学公式时才加 mathjax: true"""
+                           category: str, has_math: bool = None) -> str:
+        """生成 YAML frontmatter 块，仅当文章含数学公式时才加 mathjax: true
+
+        参数 has_math 由调用方在公式归一化之前检测传入。保留默认 None
+        以便旧调用点仍可工作（此时回退为自行检测，但可能因传入了
+        已归一化/已转换的正文而判断失准）。
+        """
         safe_title = title.replace('"', '\\"')
-        has_math = self._has_math_formula(body)
+        if has_math is None:
+            has_math = False
 
         lines = [
             '---',
@@ -553,9 +548,18 @@ Remember: You MUST output exactly one category name. DO NOT output an empty resp
         return '\n'.join(lines)
 
     def _has_math_formula(self, body: str) -> bool:
-        """检测文章是否包含 LaTeX 数学公式"""
+        r"""检测文章是否包含 LaTeX 数学公式
+
+        须在 _normalize_latex 之前调用，因此要同时覆盖归一化前后的
+        四种分隔符：\(...\)、\[...\]、$...$、$$...$$。
+        """
         # $$...$$ 块级公式
         if '$$' in body:
+            return True
+        # \(...\) 行内、\[...\] 块级（下载器从 data-formula 提取出的原始形态）
+        if re.search(r'\\\(.+?\\\)', body, flags=re.DOTALL):
+            return True
+        if re.search(r'\\\[.+?\\\]', body, flags=re.DOTALL):
             return True
         # $...$ 行内公式（排除无效模式）
         inline = re.findall(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)', body)
