@@ -27,6 +27,7 @@ from translator import Translator
 from converter import BlogConverter
 from oss_uploader import create_uploader
 from github_uploader import create_uploader as create_github_uploader
+from linkedin_writer import LinkedInWriter
 from decorative_filter import build_hash_library
 
 
@@ -75,6 +76,9 @@ class WeChatTranslatePipeline:
         self.converter = BlogConverter(llm_name=llm_name, model_name=model_name)
         self.oss_uploader = create_uploader()  # None if not configured
         self.github_uploader = create_github_uploader()  # None if not configured
+        self.linkedin_writer = LinkedInWriter(
+            llm_name=llm_name, model_name=model_name, silent=True
+        )
 
         if not silent:
             print("\n✓ 流水线就绪")
@@ -98,7 +102,7 @@ class WeChatTranslatePipeline:
         print(f"{'─' * 60}")
 
         # ── Step 1: 下载 ──
-        print("\n[Step 1/6] 下载文章...")
+        print("\n[Step 1/7] 下载文章...")
         while True:
             result = self.downloader.download(url)
             if result and result[0]:
@@ -115,7 +119,7 @@ class WeChatTranslatePipeline:
         from utils import find_file_by_suffix
         zh_md_path = find_file_by_suffix(article_dir, '_zh.md')
 
-        print(f"\n[Step 2/6] 翻译")
+        print(f"\n[Step 2/7] 翻译")
         print(f"   中文原文: {zh_md_path}")
         print(f"   ── 这一步可以改什么 ──")
         print(f"     • 中文标题 / 正文有问题（段落串行、公式乱、缺段）:")
@@ -157,7 +161,7 @@ class WeChatTranslatePipeline:
                     return None
 
         # ── Step 3: 保存 ──
-        print("\n[Step 3/6] 保存文件...")
+        print("\n[Step 3/7] 保存文件...")
         # 文件名用原标题：Step 2 若改过中文标题，_en.md 仍与 _zh.md、
         # images_map.txt 保持同一套文件名，避免同一次运行产出两套名字。
         en_md_path = self._save_en_version(
@@ -196,7 +200,7 @@ class WeChatTranslatePipeline:
                     if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
                 )
 
-            print(f"\n[Step 4/6] 上传图片到 OSS")
+            print(f"\n[Step 4/7] 上传图片到 OSS")
             print(f"   目标: {self.oss_uploader.bucket}.{self.oss_uploader.endpoint}")
             print(f"   文件夹: {oss_folder}")
             print(f"   图片: {uploadable} 张")
@@ -234,10 +238,10 @@ class WeChatTranslatePipeline:
                 else:
                     print("   请输入 1 或 2")
         else:
-            print(f"\n[Step 4/6] OSS 未配置，跳过上传")
+            print(f"\n[Step 4/7] OSS 未配置，跳过上传")
 
         # ── Step 5: 格式转换 ──
-        print(f"\n[Step 5/6] 格式转换 → 博客格式...")
+        print(f"\n[Step 5/7] 格式转换 → 博客格式...")
         blog_path = self.converter.convert_article(
             article_dir=article_dir,
             output_dir=os.path.join(article_dir, 'blog_output'),
@@ -247,7 +251,7 @@ class WeChatTranslatePipeline:
         # ── Step 6: 上传 GitHub ──
         if self.github_uploader:
             blog_basename = os.path.basename(blog_path)
-            print(f"\n[Step 6/6] 上传 GitHub → PR")
+            print(f"\n[Step 6/7] 上传 GitHub → PR")
             print(f"   前 5 步已完成，即将提交到 {self.github_uploader.repo}")
             print(f"   文件: {blog_basename}")
             print(f"   ── 这一步可以改什么 ──")
@@ -277,7 +281,43 @@ class WeChatTranslatePipeline:
                 else:
                     print("   请输入 1 或 2")
         else:
-            print(f"\n[Step 6/6] GitHub 未配置或 gh 不可用，跳过上传")
+            print(f"\n[Step 6/7] GitHub 未配置或 gh 不可用，跳过上传")
+
+        # ── Step 7: 生成领英文案 ──
+        linkedin_dir = os.path.join(article_dir, 'linkedin')
+        print(f"\n[Step 7/7] 生成领英动态文案")
+        print(f"   基于博客文件生成，输出到: {linkedin_dir}")
+        print(f"   ── 这一步可以改什么 ──")
+        print(f"     【生成后】文案是纯文本，直接全选复制即可发领英")
+        print(f"     【不满意】改完博客正文后重跑这一步，或手动编辑输出的 txt")
+        print(f"   ⚠️ 文案里的数字会自动核对是否出自博客正文，")
+        print(f"      出现「未能找到出处」提示时务必人工确认再发布")
+
+        while True:
+            choice = input("   [1] 生成文案  [2] 跳过: ").strip()
+            if choice == '1':
+                while True:
+                    try:
+                        linkedin_path = self.linkedin_writer.generate(
+                            blog_path=blog_path,
+                            output_dir=linkedin_dir,
+                        )
+                        print(f"   ✅ 文案: {linkedin_path}")
+                        print(f"\n{'·' * 60}")
+                        with open(linkedin_path, 'r', encoding='utf-8') as f:
+                            print(f.read().rstrip())
+                        print(f"{'·' * 60}")
+                        break
+                    except Exception as e:
+                        if not _ask_retry("领英文案生成", str(e)):
+                            print("   ⚠️ 跳过领英文案生成")
+                            break
+                break
+            elif choice == '2':
+                print(f"   ⏭️ 已跳过领英文案生成")
+                break
+            else:
+                print("   请输入 1 或 2")
 
         # ── 完成 ──
         print(f"\n{'─' * 60}")
